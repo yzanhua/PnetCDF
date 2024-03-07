@@ -104,16 +104,6 @@ ncmpi_def_var(int         ncid,    /* IN:  file ID */
         goto err_check;
     }
 
-    /* check whether new name is already in use, for this API (def_var) the
-     * name should NOT already exist */
-    err = pncp->driver->inq_varid(pncp->ncp, name, NULL);
-    if (err != NC_ENOTVAR) {
-        DEBUG_ASSIGN_ERROR(err, NC_ENAMEINUSE)
-        goto err_check;
-    }
-    else
-        err = NC_NOERR;
-
     /* check dimids[] */
     if (ndims > 0 && dimids == NULL) { /* for non-scalar variable */
         DEBUG_ASSIGN_ERROR(err, NC_EINVAL)

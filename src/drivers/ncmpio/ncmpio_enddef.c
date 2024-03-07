@@ -916,6 +916,30 @@ check_rec_var:
     return NC_NOERR;
 }
 
+int compare_dim_name(const void *a, const void *b) {
+    NC_dim * dim_a = *(NC_dim **)a;
+    NC_dim * dim_b = *(NC_dim **)b;
+    if (dim_a->name_len < dim_b->name_len) {
+        return -1;
+    } else if (dim_a->name_len > dim_b->name_len) {
+        return 1;
+    } else {
+        return strcmp(dim_a->name, dim_b->name);
+    }
+}
+
+int compare_var_name(const void *a, const void *b) {
+    NC_var * var_a = *(NC_var **)a;
+    NC_var * var_b = *(NC_var **)b;
+    if (var_a->name_len < var_b->name_len) {
+        return -1;
+    } else if (var_a->name_len > var_b->name_len) {
+        return 1;
+    } else {
+        return strcmp(var_a->name, var_b->name);
+    }
+}
+
 /*----< ncmpio__enddef() >---------------------------------------------------*/
 /* This is a collective subroutine.
  * h_minfree  Sets the pad at the end of the "header" section, i.e. at least
@@ -938,6 +962,44 @@ ncmpio__enddef(void       *ncdp,
     int i, num_fix_vars, mpireturn, err=NC_NOERR, status=NC_NOERR;
     char value[MPI_MAX_INFO_VAL];
     NC *ncp = (NC*)ncdp;
+    int duplicate_fnd = 0;
+
+    /* check for duplicates dim names */
+    double timer = MPI_Wtime();
+    // TODO: check whether ncp->dims.ndefined is the correct size
+    NC_dim ** sort_dims = (NC_dim **) malloc(ncp->dims.ndefined * sizeof(NC_dim*));
+    memcpy(sort_dims, ncp->dims.value, ncp->dims.ndefined * sizeof(NC_dim*));
+    qsort(sort_dims, ncp->dims.ndefined, sizeof(NC_dim*), compare_dim_name);
+    for (int i = 0; i < ncp->dims.ndefined - 1; i++) {
+        if (compare_dim_name(&sort_dims[i], &sort_dims[i+1]) == 0) {
+            duplicate_fnd ++;
+            printf("Duplicate dim name: %s\n", sort_dims[i]->name);
+            // TODO: ERROR OUT
+        }
+    }
+    free(sort_dims); sort_dims = NULL;
+    timer = MPI_Wtime() - timer;
+    printf("Time to check for duplicate dim names: %f\n", timer);
+
+    /* check for duplicate var names */
+    timer = MPI_Wtime();
+    // TODO: check whether ncp->vars.ndefined is the correct size
+    NC_var** sort_vars = (NC_var **) malloc(ncp->vars.ndefined * sizeof(NC_var*));
+    memcpy(sort_vars, ncp->vars.value, ncp->vars.ndefined * sizeof(NC_var*));
+    qsort(sort_vars, ncp->vars.ndefined, sizeof(NC_var*), compare_var_name);
+    duplicate_fnd = 0;
+    for (int i = 0; i < ncp->vars.ndefined - 1; i++) {
+        if (compare_var_name(&sort_vars[i], &sort_vars[i+1]) == 0) {
+            duplicate_fnd ++;
+            printf("Duplicate var name: %s\n", sort_vars[i]->name);
+            // TODO: ERROR OUT
+        }
+    }
+    free(sort_vars); sort_vars = NULL;
+    timer = MPI_Wtime() - timer;
+    printf("Time to check for duplicate var names: %f\n", timer);
+
+
 
     /* negative values of h_minfree, v_align, v_minfree, r_align have been
      * checked at dispatchers.
