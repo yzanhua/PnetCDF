@@ -210,6 +210,7 @@ ncmpio_def_dim(void       *ncdp,    /* IN:  NC object */
     dimp->size     = size;
     dimp->name     = nname;
     dimp->name_len = strlen(nname);
+    dimp->name_hash = SIP64_hash((uint8_t*)nname, dimp->name_len, 0, 0);
 
     /* allocate/expand ncp->dims.value array */
     if (ncp->dims.ndefined % NC_ARRAY_GROWBY == 0) {

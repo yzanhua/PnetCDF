@@ -121,6 +121,7 @@ typedef struct {
     MPI_Offset  size;
     size_t      name_len; /* strlen(name), for faster string compare */
     char       *name;
+    uint64_t name_hash; /* hash of name */
 } NC_dim;
 
 /* The dimension ID returned from ncmpi_def_dim() is a pointer to type "int"
@@ -222,6 +223,7 @@ typedef struct {
                               total size in bytes of the array variable.
                               For record variable, this is the record size */
     NC_attrarray  attrs;   /* attribute array */
+    uint64_t name_hash; /* hash of name */
 #ifdef ENABLE_SUBFILING
     int           num_subfiles;
     int           ndims_org;  /* ndims before subfiling */
@@ -514,6 +516,9 @@ ncmpio_rotating_hash(const char *str_name);
 
 extern int
 ncmpio_Bernstein_hash(const char *str_name);
+
+extern uint64_t
+SIP64_hash (const uint8_t *in, const size_t inlen, uint64_t seed0, uint64_t seed1);
 
 extern int
 ncmpio_Pearson_hash(const char *str_name);

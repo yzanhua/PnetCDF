@@ -919,9 +919,9 @@ check_rec_var:
 int compare_dim_name(const void *a, const void *b) {
     NC_dim * dim_a = *(NC_dim **)a;
     NC_dim * dim_b = *(NC_dim **)b;
-    if (dim_a->name_len < dim_b->name_len) {
+    if (dim_a->name_hash < dim_b->name_hash) {
         return -1;
-    } else if (dim_a->name_len > dim_b->name_len) {
+    } else if (dim_a->name_hash > dim_b->name_hash) {
         return 1;
     } else {
         return strcmp(dim_a->name, dim_b->name);
@@ -931,9 +931,9 @@ int compare_dim_name(const void *a, const void *b) {
 int compare_var_name(const void *a, const void *b) {
     NC_var * var_a = *(NC_var **)a;
     NC_var * var_b = *(NC_var **)b;
-    if (var_a->name_len < var_b->name_len) {
+    if (var_a->name_hash < var_b->name_hash) {
         return -1;
-    } else if (var_a->name_len > var_b->name_len) {
+    } else if (var_a->name_hash > var_b->name_hash) {
         return 1;
     } else {
         return strcmp(var_a->name, var_b->name);

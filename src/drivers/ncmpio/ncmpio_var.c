@@ -70,6 +70,7 @@ ncmpio_new_NC_var(char *name, size_t name_len, int ndims)
     varp->name     = name;         /* name has been malloc-ed */
     varp->name_len = name_len;     /* name has been NULL checked */
     varp->ndims    = ndims;
+    varp->name_hash = SIP64_hash((uint8_t*)name, name_len, 0, 0);
 
     return varp;
 }
