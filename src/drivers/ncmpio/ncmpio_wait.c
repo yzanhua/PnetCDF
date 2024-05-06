@@ -381,6 +381,22 @@ construct_filetypes(NC           *ncp,
             count  = reqs[i].start + ndims;
             stride = fIsSet(lead->flag, NC_REQ_STRIDE_NULL) ?
                      NULL : count + ndims;
+            printf("===========\n");
+            printf("var name = %s\n", lead->varp->name);
+            printf("ndims = %d\n", ndims);
+            for (int ii = 0; ii < lead->varp->ndims; ii++) {
+                printf("start[%d] = %lld\n", ii, reqs[i].start[ii]);
+            }
+            for (int ii = 0; ii < lead->varp->ndims; ii++) {
+                printf("count[%d] = %lld\n", ii, count[ii]);
+            }
+            if (stride) {
+                for (int ii = 0; ii < lead->varp->ndims; ii++) {
+                    printf("stride[%d] = %lld\n", ii, stride[ii]);
+                }
+            } else {
+                printf("stride is NULL\n");
+            }
 
             err = ncmpio_filetype_create_vars(ncp,
                                               lead->varp,
