@@ -4,6 +4,9 @@
  */
 /* $Id$ */
 
+// #include "mpi.h"
+// #include <stdint.h>
+// #include <sys/types.h>
 #ifdef HAVE_CONFIG_H
 # include <config.h>
 #endif
@@ -413,4 +416,109 @@ ncmpio_hash_table_populate_NC_attr(NC *ncp)
             nameT->num++;
         }
     }
+}
+
+uint64_t user_hash (const void *item, uint64_t seed0, uint64_t seed1) {
+    MPI_Offset *key = ((dtype_cache *)item)->key;
+    return hashmap_sip (key, sizeof (key), seed0, seed1);
+}
+
+int compare_dtype_cache_key (const void *item_ptr_a, const void *item_ptr_b, void *udata) {
+    // item is a dtype_cache*; item_ptr is a pointer to item
+    MPI_Offset *key_a = ((dtype_cache *)(*(void **)item_ptr_a))->key;
+    MPI_Offset *key_b = ((dtype_cache *)(*(void **)item_ptr_b))->key;
+    for (int i = 0; i < DTYPE_CACHE_NUM_KEYS; i++) {
+        if (key_a[i] < key_b[i]) {
+            return -1;
+        } else if (key_a[i] > key_b[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void elfree (void *item_ptr) {
+    // item is a dtype_cache*; item_ptr is a pointer to item
+    printf ("elfree\n");
+    dtype_cache *cache = (dtype_cache *)(*(void **)item_ptr);
+    printf ("need_free: %d\n", cache->need_free);
+    if (cache->need_free) { MPI_Type_free (&cache->dtype); }
+    free (cache);
+}
+
+dtype_cache *get_dtype_cache (int ndim,
+                              const MPI_Offset *count,
+                              const MPI_Offset *stride,
+                              hashmap_t *map,
+                              uint64_t *hash_in_ptr,
+                              uint64_t *hash_out_ptr) {
+    dtype_cache query;
+    uint64_t hash;
+    if (hash_in_ptr) {
+        hash = *hash_in_ptr;
+    } else {
+        // init key to -1
+        for (int i = 0; i < DTYPE_CACHE_NUM_KEYS; i++) { query.key[i] = -1; }
+
+        // update key
+        query.key[0] = ndim;
+        if (count) {
+            for (int i = 0; i < ndim; i++) { query.key[i + 1] = count[i]; }
+        }
+        if (stride) {
+            for (int i = 0; i < ndim; i++) { query.key[i + 5] = stride[i]; }
+        }
+        hash = user_hash (&query, 0, 0);
+    }
+    if (hash_out_ptr) { *hash_out_ptr = hash; }
+
+    void *query_item          = &query;
+    const void *curr_item_ptr = hashmap_get_with_hash (map, &query_item, hash);
+    if (curr_item_ptr != NULL) {  // found in cache
+        // item is a dtype_cache*; item_ptr is a pointer to item
+        if (hash_out_ptr) { *hash_out_ptr = hash; }
+        return (dtype_cache *)(*(void **)curr_item_ptr);
+    }
+
+    // not found in cache
+    return NULL;
+}
+
+dtype_cache *insert_dtype_cache (int ndim,
+                                 const MPI_Offset *count,
+                                 const MPI_Offset *stride,
+                                 hashmap_t *map,
+                                 uint64_t *hash_in_ptr,
+                                 MPI_Datatype dtype,
+                                 int need_free) {
+    dtype_cache *new_item = (dtype_cache *)malloc (sizeof (dtype_cache));
+    for (int i = 0; i < DTYPE_CACHE_NUM_KEYS; i++) { new_item->key[i] = -1; }
+
+    // update key
+    new_item->key[0] = ndim;
+    if (count) {
+        for (int i = 0; i < ndim; i++) { new_item->key[i + 1] = count[i]; }
+    }
+    if (stride) {
+        for (int i = 0; i < ndim; i++) { new_item->key[i + 5] = stride[i]; }
+    }
+
+    uint64_t hash;
+    if (hash_in_ptr) {
+        hash = *hash_in_ptr;
+    } else {
+        hash = user_hash (new_item, 0, 0);
+    }
+
+    new_item->dtype     = dtype;
+    new_item->need_free = need_free;
+
+    hashmap_set_with_hash (map, &new_item, hash);
+    return new_item;
+}
+
+hashmap_t *ncmpio_create_dtype_hash () {
+    hashmap_t *map = hashmap_new (sizeof (dtype_cache *), 0, 0, 0, user_hash,
+                                  compare_dtype_cache_key, elfree, NULL);
+    return map;
 }

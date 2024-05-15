@@ -378,8 +378,15 @@ filetype_create_vara(const NC         *ncp,
         if (rectype != MPI_BYTE) MPI_Type_free(&rectype);
     }
     else { /* for non-record variable, just create a subarray datatype */
-        status = type_create_subarray64(varp->ndims, varp->shape, count, start,
+        /*
+         * use start = {0}, so that the created filetype can be used
+         * for other reqs with different start. The correct offset is
+         * calculated in ncmpio_wait.c:ncmpio_cal_offset(...).
+         */
+        MPI_Offset* zero_start = (MPI_Offset*) NCI_Calloc(varp->ndims, sizeof(MPI_Offset));
+        status = type_create_subarray64(varp->ndims, varp->shape, count, zero_start,
                                         MPI_ORDER_C, xtype, &filetype);
+        NCI_Free(zero_start);
         if (status != NC_NOERR) return status;
     }
     MPI_Type_commit(&filetype);
@@ -600,6 +607,154 @@ ncmpio_filetype_create_vars(const NC         *ncp,
         MPI_Type_commit(&filetype);
         *filetype_ptr = filetype;
     }
+
+    return err;
+}
+
+int
+ncmpio_filetype_create_vars_new(const NC         *ncp,
+                            const NC_var     *varp,
+                            const MPI_Offset *start,
+                            const MPI_Offset *count,
+                            const MPI_Offset *stride,
+                            MPI_Datatype     *filetype_ptr,       /* OUT */
+                            int              *is_filetype_contig, /* OUT */
+                            struct hashmap   *map)                /* OUT */
+{
+    int           err=NC_NOERR, mpireturn, dim, isLargeReq;
+    MPI_Aint     *disps;
+    MPI_Offset    i, nblocks, nelems, *blocklens;
+    MPI_Datatype  filetype=MPI_BYTE;
+    uint64_t hash;
+
+    dtype_cache *dtype_cache_ptr = get_dtype_cache(varp->ndims, count, stride, map, NULL, &hash);
+    if (dtype_cache_ptr != NULL) {
+        *filetype_ptr = dtype_cache_ptr->dtype;
+        // check rank
+        printf("DEBUG: Found in cache\n");
+        return NC_NOERR;
+    }
+
+    printf("DEBUG: Not Found in cache\n");
+    if (stride == NULL) {
+        // feed i to the function; as offset_ptr is not used
+        err = filetype_create_vara(ncp, varp, start, count, &i,
+                                    filetype_ptr, is_filetype_contig);
+        if (err != NC_NOERR) return err;
+        int need_free = (*filetype_ptr == MPI_BYTE) ? 0 : 1;
+        insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, need_free);
+        return err;
+    }
+
+    /* check if a true vars (skip stride[] when count[] == 1) */
+    for (dim=0; dim<varp->ndims; dim++)
+        if (count[dim] > 1 && stride[dim] > 1)
+            break;
+
+    if (dim == varp->ndims) /* not a true vars */
+        // feed i to the function; as offset_ptr is not used
+        // TODO: insert_dtype_cache; check correctness
+        return filetype_create_vara(ncp, varp, start, count, &i,
+                                    filetype_ptr, is_filetype_contig);
+
+    /* now stride[] indicates a non-contiguous fileview */
+
+    /* calculate request amount */
+    nelems = 1;
+    for (dim=0; dim<varp->ndims; dim++) nelems *= count[dim];
+
+    /* when nelems == 0 or varp is a scalar, i.e. varp->ndims == 0, no need to
+     * create a filetype
+     */
+    if (varp->ndims == 0 || nelems == 0) {
+        *filetype_ptr = MPI_BYTE;
+        if (is_filetype_contig != NULL) *is_filetype_contig = 1;
+        // TODO: insert_dtype_cache; check correctness
+        return NC_NOERR;
+    }
+
+    /* hereinafter fileview is noncontiguous, i.e. filetype != MPI_BYTE */
+    if (is_filetype_contig != NULL) *is_filetype_contig = 0;
+
+    /* flatten stride access into list of offsets and lengths stored in
+     * disps[] and blocklens[], respectively.
+     */
+    stride_flatten(varp, ncp->recsize, start, count, stride, &nblocks,
+                   &blocklens, &disps);
+
+    /* the flattened list allows one single call to hindexed constructor.
+     * We cannot use MPI_Type_indexed because displacement for the record
+     * dimension may not be a multiple of varp->xtype
+     */
+    isLargeReq = 0;
+    if (nblocks > NC_MAX_INT)
+        isLargeReq = 1;
+    else {
+        for (i=0; i<nblocks; i++) {
+            if (blocklens[i] > NC_MAX_INT) {
+                isLargeReq = 1;
+                break;
+            }
+        }
+    }
+
+    if (isLargeReq) {
+#ifdef HAVE_MPI_TYPE_CREATE_HINDEXED_C
+        MPI_Count *blocklens_c, *disps_c;
+        blocklens_c = (MPI_Count *)NCI_Malloc (sizeof (MPI_Count) * nblocks);
+        disps_c     = (MPI_Count *)NCI_Malloc (sizeof (MPI_Count) * nblocks);
+        for (i = 0; i < nblocks; i++) {
+            blocklens_c[i] = blocklens[i];
+            disps_c[i]     = disps[i];
+        }
+
+        // remove the first element from disps for future use
+        // i.e. insenstive to start
+        for (i = nblocks-1; i >= 0; i--) {
+            disps_c[i] -= disps_c[0];
+        }
+
+        mpireturn = MPI_Type_create_hindexed_c(nblocks, blocklens_c, disps_c,
+                                               MPI_BYTE, &filetype);
+        NCI_Free(blocklens_c);
+        NCI_Free(disps_c);
+#else
+        *filetype_ptr = MPI_DATATYPE_NULL;
+        DEBUG_ASSIGN_ERROR(err, NC_EINTOVERFLOW)
+        mpireturn = MPI_SUCCESS;
+#endif
+    }
+    else {
+        int *blocklens_i;
+        blocklens_i = (int*) NCI_Malloc(sizeof(int) * nblocks);
+        for (i=0; i<nblocks; i++)
+            blocklens_i[i] = (int)blocklens[i];
+
+        // remove the first element from disps for future use
+        // i.e. insenstive to start
+        for (i = nblocks-1; i >= 0; i--) {
+            disps[i] -= disps[0];
+        }
+
+        mpireturn = MPI_Type_create_hindexed((int)nblocks, blocklens_i, disps,
+                                             MPI_BYTE, &filetype);
+        NCI_Free(blocklens_i);
+    }
+
+    if (disps != NULL) NCI_Free(disps);
+    if (blocklens != NULL) NCI_Free(blocklens);
+
+    if (mpireturn != MPI_SUCCESS) {
+        err = ncmpii_error_mpi2nc(mpireturn, "MPI_Type_create_hindexed");
+        *filetype_ptr = MPI_DATATYPE_NULL;
+    }
+    else {
+        MPI_Type_commit(&filetype);
+        *filetype_ptr = filetype;
+    }
+
+    // insert the newly created datatype into the cache
+    insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, 1);
 
     return err;
 }

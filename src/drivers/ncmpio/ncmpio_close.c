@@ -157,6 +157,8 @@ ncmpio_close(void *ncdp)
     }
 #endif
 
+    ncmpio_free_dtype_cache();
+
     /* calling MPI_File_close() */
     err = ncmpio_close_files(ncp, 0);
     if (status == NC_NOERR) status = err;

@@ -17,6 +17,8 @@
 #include <dispatch.h>
 #include "ncmpio_driver.h"
 
+#include "hashmap.h"   /* hashmap_t */
+
 #define FILE_ALIGNMENT_DEFAULT 512
 #define FILE_ALIGNMENT_LB      4
 
@@ -508,6 +510,12 @@ ncmpio_filetype_create_vars(const NC* ncp, const NC_var* varp,
                 MPI_Datatype *filetype, int *is_filetype_contig);
 
 extern int
+ncmpio_filetype_create_vars_new(const NC* ncp, const NC_var* varp,
+                const MPI_Offset start[], const MPI_Offset count[],
+                const MPI_Offset stride[],
+                MPI_Datatype *filetype, int *is_filetype_contig,
+                hashmap_t *map);
+extern int
 ncmpio_file_set_view(const NC *ncp, MPI_File fh, MPI_Offset *offset,
                 MPI_Datatype filetype);
 
@@ -575,6 +583,53 @@ ncmpio_hash_table_populate_NC_dim(NC_dimarray *dimsp, int hash_size);
 
 extern void
 ncmpio_hash_table_populate_NC_attr(NC *ncp);
+
+#define DTYPE_CACHE_NUM_KEYS 9
+#define DTYPE_CACHE_MAX_DIMS 4
+typedef struct {
+    /*
+    * key[0] = ndims (assert ndims <= 4)
+    * key[1] = count[0]
+    * key[2] = count[1]
+    * key[3] = count[2]
+    * key[4] = count[3]
+    * key[5] = stride[0]
+    * key[6] = stride[1]
+    * key[7] = stride[2]
+    * key[8] = stride[3]
+    *
+    * should default to -1
+    */
+    MPI_Offset key[DTYPE_CACHE_NUM_KEYS];
+    MPI_Datatype dtype; // value: MPI datatype
+    int need_free; // 1 if dtype needs to be freed, 0 otherwise
+
+} dtype_cache;
+
+
+
+
+extern dtype_cache *
+get_dtype_cache (int ndim,
+                const MPI_Offset *count,
+                const MPI_Offset *stride,
+                hashmap_t *map,
+                uint64_t *hash_in_ptr,
+                uint64_t *hash_out_ptr);
+extern dtype_cache *
+insert_dtype_cache (int ndim,
+                const MPI_Offset *count,
+                const MPI_Offset *stride,
+                hashmap_t *map,
+                uint64_t *hash_in_ptr,
+                MPI_Datatype dtype,
+                int need_free);
+
+extern hashmap_t*
+ncmpio_create_dtype_hash();
+
+extern void
+ncmpio_free_dtype_cache();
 
 /* Begin defined in ncmpio_fill.c -------------------------------------------*/
 extern int

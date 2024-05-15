@@ -322,6 +322,104 @@ ncmpio_cancel(void *ncdp,
     return status;
 }
 
+static hashmap_t *datatype_map = NULL;
+
+static hashmap_t *get_datatype_map() {
+    if (datatype_map == NULL) {
+        datatype_map = ncmpio_create_dtype_hash();
+    }
+    return datatype_map;
+}
+
+void
+ncmpio_free_dtype_cache() {
+    if (datatype_map != NULL) {
+        hashmap_free(datatype_map);
+        datatype_map = NULL;
+    }
+}
+
+static int is_request_contiguous_temp_copy (int isRecVar,
+                                  int numRecVars,
+                                  int ndims,
+                                  const MPI_Offset *shape,
+                                  const MPI_Offset *start,
+                                  const MPI_Offset *count) {
+    int i, j, most_sig_dim;
+
+    if (ndims == 0) return 1; /* this variable is a scalar */
+
+    for (i = 0; i < ndims; i++)
+        if (count[i] == 0) /* zero length request */
+            return 1;
+
+    /* most-significant dim. record dimension */
+    most_sig_dim = 0;
+
+    if (isRecVar) {
+        if (numRecVars > 1) {
+            if (count[0] > 1) return 0;
+            most_sig_dim = 1;
+        }
+    }
+
+    for (i = ndims - 1; i > most_sig_dim; i--) {
+        if (count[i] < shape[i]) {
+            for (j = i - 1; j >= most_sig_dim; j--) {
+                if (count[j] > 1) return 0;
+            }
+            break;
+        }
+    }
+    return 1;
+}
+
+static int ncmpio_cal_offset (NC *ncp,
+                              NC_var *varp,
+                              MPI_Offset *start,
+                              MPI_Offset *count,
+                              MPI_Offset *stride,
+                              MPI_Offset *offset_ptr) {
+    MPI_Offset offset;
+    int status   = NC_NOERR;
+    int isRecVar = IS_RECVAR (varp);
+    *offset_ptr = varp->begin;
+
+    if (stride == NULL) {
+        if (is_request_contiguous_temp_copy (isRecVar, ncp->vars.num_rec_vars, varp->ndims,
+                                             varp->shape, start, count)) {
+            /* find the starting file offset of this request */
+            status      = ncmpio_first_offset (ncp, varp, start, &offset);
+            *offset_ptr = offset;
+            return status;
+        }
+    }
+
+    int el_size = varp->xsz;
+    int ndims   = varp->ndims;
+
+    MPI_Aint disp0 = start[ndims - 1] * el_size;
+    /* done with the lowest dimension */
+    ndims--;
+
+    MPI_Offset array_len = el_size;
+    MPI_Offset off;
+    while (ndims > 0) {
+        array_len *= varp->shape[ndims];  // dimlen[ndims];
+        if (ndims == 1 && isRecVar)
+            off = start[0] * ncp->recsize;
+        else
+            off = start[ndims - 1] * array_len;
+
+        /* update all offsets from lowest up to dimension ndims-1 */
+        disp0 += off;
+        ndims--;
+    }
+    *offset_ptr += disp0;
+    // TODO: check whether fully implemented
+    return NC_NOERR;
+}
+
 /*----< construct_filetypes() >----------------------------------------------*/
 /* concatenate the requests into a single MPI derived filetype */
 static int
@@ -352,6 +450,7 @@ construct_filetypes(NC           *ncp,
     /* create a filetype for each request */
     last_contig_req = -1; /* index of the last contiguous request */
     j = 0;                /* index of last valid ftypes */
+    printf("num_reqs = %d\n", num_reqs);
     for (i=0; i<num_reqs; i++, j++) {
         int is_ftype_contig, ndims;
         NC_lead_req *lead;
@@ -381,31 +480,29 @@ construct_filetypes(NC           *ncp,
             count  = reqs[i].start + ndims;
             stride = fIsSet(lead->flag, NC_REQ_STRIDE_NULL) ?
                      NULL : count + ndims;
-            printf("===========\n");
-            printf("var name = %s\n", lead->varp->name);
-            printf("ndims = %d\n", ndims);
-            for (int ii = 0; ii < lead->varp->ndims; ii++) {
-                printf("start[%d] = %lld\n", ii, reqs[i].start[ii]);
-            }
-            for (int ii = 0; ii < lead->varp->ndims; ii++) {
-                printf("count[%d] = %lld\n", ii, count[ii]);
-            }
+            printf ("===========\n");
+            printf ("var name = %s\n", lead->varp->name);
+            printf ("ndims = %d\n", ndims);
+            printf ("start: ");
+            for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", reqs[i].start[ii]); }
+            printf ("\ncount: ");
+            for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", count[ii]); }
+            printf ("\nstride: ");
             if (stride) {
-                for (int ii = 0; ii < lead->varp->ndims; ii++) {
-                    printf("stride[%d] = %lld\n", ii, stride[ii]);
-                }
+                for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", stride[ii]); }
             } else {
-                printf("stride is NULL\n");
+                printf ("NULL");
             }
+            printf ("\n");
 
-            err = ncmpio_filetype_create_vars(ncp,
-                                              lead->varp,
-                                              reqs[i].start,
-                                              count,
-                                              stride,
-                                              &offset,
-                                              &ftypes[j],
-                                              &is_ftype_contig);
+            hashmap_t *map = get_datatype_map ();
+            err = ncmpio_filetype_create_vars_new (ncp, lead->varp, reqs[i].start, count, stride,
+                                                   &ftypes[j], &is_ftype_contig, map);
+
+            // update offset
+            err = ncmpio_cal_offset(ncp, lead->varp, reqs[i].start, count, stride, &offset);
+            printf("my cal offset = %lld\n", offset);
+            printf("is_ftype_contig = %d\n", is_ftype_contig);
 
 #if SIZEOF_MPI_AINT < SIZEOF_MPI_OFFSET
             if (err == NC_NOERR && offset > NC_MAX_INT)
@@ -467,6 +564,11 @@ construct_filetypes(NC           *ncp,
             last_contig_req = -1;
             all_ftype_contig = 0;
         }
+        if (ftypes[j] == MPI_BYTE) {
+            printf("ftypes[%d] = MPI_BYTE\n", j);
+        }
+        printf("blocklens[%d] = %lld\n", j, blocklens[j]);
+        printf("disps[%d] = %lld\n", j, disps[j]);
     }
     /* j is the new num_reqs */
     num_reqs = j;
@@ -521,10 +623,6 @@ construct_filetypes(NC           *ncp,
         if (status == NC_NOERR) status = err; /* report the first error */
     }
 
-    for (i=0; i<num_reqs; i++) {
-        if (ftypes[i] != MPI_BYTE)
-            MPI_Type_free(&ftypes[i]);
-    }
     NCI_Free(ftypes);
 
     return status;

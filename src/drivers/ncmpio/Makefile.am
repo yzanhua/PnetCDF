@@ -32,7 +32,8 @@ M4_SRCS   = ncmpio_getput.m4 \
 
 H_SRCS = ncmpio_driver.h \
          ncmpio_NC.h \
-         ncmpio_subfile.h
+         ncmpio_subfile.h \
+         hashmap.h
 
 C_SRCS = ncmpio_driver.c \
          ncmpio_create.c \
@@ -52,7 +53,8 @@ C_SRCS = ncmpio_driver.c \
          ncmpio_fill.c \
          ncmpio_util.c \
          ncmpio_hash_func.c \
-         ncmpio_file_io.c
+         ncmpio_file_io.c \
+         hashmap.c
 
 $(M4_SRCS:.m4=.c): Makefile
 
