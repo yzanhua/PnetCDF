@@ -480,20 +480,20 @@ construct_filetypes(NC           *ncp,
             count  = reqs[i].start + ndims;
             stride = fIsSet(lead->flag, NC_REQ_STRIDE_NULL) ?
                      NULL : count + ndims;
-            printf ("===========\n");
-            printf ("var name = %s\n", lead->varp->name);
-            printf ("ndims = %d\n", ndims);
-            printf ("start: ");
-            for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", reqs[i].start[ii]); }
-            printf ("\ncount: ");
-            for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", count[ii]); }
-            printf ("\nstride: ");
-            if (stride) {
-                for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", stride[ii]); }
-            } else {
-                printf ("NULL");
-            }
-            printf ("\n");
+            // printf ("===========\n");
+            // printf ("var name = %s\n", lead->varp->name);
+            // printf ("ndims = %d\n", ndims);
+            // printf ("start: ");
+            // for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", reqs[i].start[ii]); }
+            // printf ("\ncount: ");
+            // for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", count[ii]); }
+            // printf ("\nstride: ");
+            // if (stride) {
+            //     for (int ii = 0; ii < lead->varp->ndims; ii++) { printf ("%lld ", stride[ii]); }
+            // } else {
+            //     printf ("NULL");
+            // }
+            // printf ("\n");
 
             hashmap_t *map = get_datatype_map ();
             err = ncmpio_filetype_create_vars_new (ncp, lead->varp, reqs[i].start, count, stride,
@@ -501,8 +501,8 @@ construct_filetypes(NC           *ncp,
 
             // update offset
             err = ncmpio_cal_offset(ncp, lead->varp, reqs[i].start, count, stride, &offset);
-            printf("my cal offset = %lld\n", offset);
-            printf("is_ftype_contig = %d\n", is_ftype_contig);
+            // printf("my cal offset = %lld\n", offset);
+            // printf("is_ftype_contig = %d\n", is_ftype_contig);
 
 #if SIZEOF_MPI_AINT < SIZEOF_MPI_OFFSET
             if (err == NC_NOERR && offset > NC_MAX_INT)
@@ -564,11 +564,11 @@ construct_filetypes(NC           *ncp,
             last_contig_req = -1;
             all_ftype_contig = 0;
         }
-        if (ftypes[j] == MPI_BYTE) {
-            printf("ftypes[%d] = MPI_BYTE\n", j);
-        }
-        printf("blocklens[%d] = %lld\n", j, blocklens[j]);
-        printf("disps[%d] = %lld\n", j, disps[j]);
+        // if (ftypes[j] == MPI_BYTE) {
+        //     printf("ftypes[%d] = MPI_BYTE\n", j);
+        // }
+        // printf("blocklens[%d] = %lld\n", j, blocklens[j]);
+        // printf("disps[%d] = %lld\n", j, disps[j]);
     }
     /* j is the new num_reqs */
     num_reqs = j;

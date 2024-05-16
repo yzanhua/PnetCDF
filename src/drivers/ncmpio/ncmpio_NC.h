@@ -603,6 +603,7 @@ typedef struct {
     MPI_Offset key[DTYPE_CACHE_NUM_KEYS];
     MPI_Datatype dtype; // value: MPI datatype
     int need_free; // 1 if dtype needs to be freed, 0 otherwise
+    int is_contig; // 1 if dtype is contiguous, 0 otherwise
 
 } dtype_cache;
 
@@ -623,7 +624,8 @@ insert_dtype_cache (int ndim,
                 hashmap_t *map,
                 uint64_t *hash_in_ptr,
                 MPI_Datatype dtype,
-                int need_free);
+                int need_free,
+                int is_contig);
 
 extern hashmap_t*
 ncmpio_create_dtype_hash();

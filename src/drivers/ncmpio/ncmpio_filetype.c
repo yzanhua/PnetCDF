@@ -619,7 +619,7 @@ ncmpio_filetype_create_vars_new(const NC         *ncp,
                             const MPI_Offset *stride,
                             MPI_Datatype     *filetype_ptr,       /* OUT */
                             int              *is_filetype_contig, /* OUT */
-                            struct hashmap   *map)                /* OUT */
+                            struct hashmap   *map)                /* INOUT */
 {
     int           err=NC_NOERR, mpireturn, dim, isLargeReq;
     MPI_Aint     *disps;
@@ -630,19 +630,17 @@ ncmpio_filetype_create_vars_new(const NC         *ncp,
     dtype_cache *dtype_cache_ptr = get_dtype_cache(varp->ndims, count, stride, map, NULL, &hash);
     if (dtype_cache_ptr != NULL) {
         *filetype_ptr = dtype_cache_ptr->dtype;
-        // check rank
-        printf("DEBUG: Found in cache\n");
+        if (is_filetype_contig != NULL) *is_filetype_contig = dtype_cache_ptr->is_contig;
         return NC_NOERR;
     }
 
-    printf("DEBUG: Not Found in cache\n");
     if (stride == NULL) {
         // feed i to the function; as offset_ptr is not used
         err = filetype_create_vara(ncp, varp, start, count, &i,
                                     filetype_ptr, is_filetype_contig);
         if (err != NC_NOERR) return err;
         int need_free = (*filetype_ptr == MPI_BYTE) ? 0 : 1;
-        insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, need_free);
+        insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, need_free, *is_filetype_contig);
         return err;
     }
 
@@ -670,6 +668,8 @@ ncmpio_filetype_create_vars_new(const NC         *ncp,
         *filetype_ptr = MPI_BYTE;
         if (is_filetype_contig != NULL) *is_filetype_contig = 1;
         // TODO: insert_dtype_cache; check correctness
+        insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, 0, *is_filetype_contig);
+
         return NC_NOERR;
     }
 
@@ -754,7 +754,7 @@ ncmpio_filetype_create_vars_new(const NC         *ncp,
     }
 
     // insert the newly created datatype into the cache
-    insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, 1);
+    insert_dtype_cache(varp->ndims, count, stride, map, &hash, *filetype_ptr, 1, *is_filetype_contig);
 
     return err;
 }

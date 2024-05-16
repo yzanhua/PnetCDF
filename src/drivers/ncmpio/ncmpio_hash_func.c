@@ -439,9 +439,9 @@ int compare_dtype_cache_key (const void *item_ptr_a, const void *item_ptr_b, voi
 
 void elfree (void *item_ptr) {
     // item is a dtype_cache*; item_ptr is a pointer to item
-    printf ("elfree\n");
+    // printf ("elfree\n");
     dtype_cache *cache = (dtype_cache *)(*(void **)item_ptr);
-    printf ("need_free: %d\n", cache->need_free);
+    // printf ("need_free: %d\n", cache->need_free);
     if (cache->need_free) { MPI_Type_free (&cache->dtype); }
     free (cache);
 }
@@ -490,7 +490,8 @@ dtype_cache *insert_dtype_cache (int ndim,
                                  hashmap_t *map,
                                  uint64_t *hash_in_ptr,
                                  MPI_Datatype dtype,
-                                 int need_free) {
+                                 int need_free,
+                                 int is_contig) {
     dtype_cache *new_item = (dtype_cache *)malloc (sizeof (dtype_cache));
     for (int i = 0; i < DTYPE_CACHE_NUM_KEYS; i++) { new_item->key[i] = -1; }
 
@@ -512,6 +513,7 @@ dtype_cache *insert_dtype_cache (int ndim,
 
     new_item->dtype     = dtype;
     new_item->need_free = need_free;
+    new_item->is_contig = is_contig;
 
     hashmap_set_with_hash (map, &new_item, hash);
     return new_item;
